@@ -47,11 +47,11 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-
 ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
 
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim2;
 
 /* USER CODE BEGIN PV */
 
@@ -63,6 +63,7 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_TIM1_Init(void);
+static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -74,21 +75,21 @@ volatile uint32_t ADC_buffer[4]; // Buffer que guarda los valores analógicos qu
 int Intensidad = 0; // Valor del duty cycle que representará la intensidad a la que ilumina el LED seleccionado
 bool R, L, U, D; // boolean variables para definir posición del joystick
 volatile uint32_t Joystick_V, Joystick_H, LDR, Potentiometer; // Valores analógicos de los ejes X e Y del Joystic respectivamente y de la LDR y el potenciómetro
-uint32_t num; // variable para representar en el display
-volatile bool flag = 0;//valor booleano que cambia de 0 a 1 con la interrupcion del botón
-int umbral_luz = 300;//Umbral que define cuando el led se apaga y cuando se enciende debido al valor medido de la LDR
+volatile bool flag = 0;
+int umbral_luz = 35;
 
-void map ()// funcion encargada de traducir el valor analógico leído del Joystick a valores de dcha, izq, arriba y abajo
+
+void map ()// funcion encargada de traducir el valor analógico leído del Joystick a valores de dcha, izq, arriba y abajo o lo que se precise
 {
 	R = U = D = L = 0;
 
-	if (ADC_buffer[0] >= 4000)
+	if (ADC_buffer[0] >= 4000) //Un valor que llega a 5000 en el plano horizontal luego si es mayor del humbral de 4000 consideramos que esta en la izquierda
 		L = 1;
-	if (ADC_buffer[0] <= 800)
+	if (ADC_buffer[0] <= 800)//Un valor que llega a 0 en el plano horizontal luego si es menor del humbral de 800 consideramos que esta en la derecha
 		R = 1;
-	if (ADC_buffer[1] >= 4000)
+	if (ADC_buffer[1] >= 4000)//Un valor que llega a 5000 en el plano vertical luego si es mayor del humbral de 4000 consideramos que esta arriba
 		U = 1;
-	if (ADC_buffer[1] <= 800)
+	if (ADC_buffer[1] <= 800)//Un valor que llega a 0 en el plano vertical luego si es mayor del humbral de 4000 consideramos que esta abajo
 		D = 1;
 }
 
@@ -96,10 +97,10 @@ void enable_lights(bool EN)
 {
 		if (EN)
 		{
-			__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_4, Intensidad);//led encendido, dependiendo del potenciometro ilumina mas o menos
+					__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_4, Intensidad);
 		}
 		else
-			__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_4, 0);//led apagado
+					__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_4, 0);
 }
 
 void RGB_Control ()
@@ -108,9 +109,10 @@ void RGB_Control ()
 				if(U)
 				{
 
-						HAL_GPIO_WritePin(GPIOE, GPIO_PIN_9, 1);//Enciende un color y apaga los demas
+						HAL_GPIO_WritePin(GPIOE, GPIO_PIN_9, 1);//Enciende uno de los LEDs dependiendo de la posición del Joystick
 						HAL_GPIO_WritePin(GPIOE, GPIO_PIN_11, 0);
 						HAL_GPIO_WritePin(GPIOE, GPIO_PIN_13, 0);
+						HAL_TIM_OC_Stop (&htim2, TIM_CHANNEL_3);
 				}
 				if(D)
 				{
@@ -118,60 +120,59 @@ void RGB_Control ()
 						HAL_GPIO_WritePin(GPIOE, GPIO_PIN_9, 0);
 						HAL_GPIO_WritePin(GPIOE, GPIO_PIN_11, 1);
 						HAL_GPIO_WritePin(GPIOE, GPIO_PIN_13, 0);
+						HAL_TIM_OC_Stop (&htim2, TIM_CHANNEL_3);
 				}
 				if(R)
 				{
-
-						HAL_GPIO_WritePin(GPIOE, GPIO_PIN_9, 0);
-						HAL_GPIO_WritePin(GPIOE, GPIO_PIN_11, 0);
-						HAL_GPIO_WritePin(GPIOE, GPIO_PIN_13, 1);
+							HAL_TIM_OC_Start (&htim2, TIM_CHANNEL_3); //Hace un parpadeo que emula una discoteca
 				}
 				if(L)
 				{
-					HAL_GPIO_WritePin(GPIOE, GPIO_PIN_9, 1);//Enciende los tres colores a la vez lo que simula un blanco fuerte
+					HAL_GPIO_WritePin(GPIOE, GPIO_PIN_9, 1);
 					HAL_GPIO_WritePin(GPIOE, GPIO_PIN_11, 1);
 					HAL_GPIO_WritePin(GPIOE, GPIO_PIN_13, 1);
+					HAL_TIM_OC_Stop (&htim2, TIM_CHANNEL_3);
 				}
 }
 
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) //Interrupcion que hace un toggle de una flag para activar o desactivar modos con el boton
 {
-	if (GPIO_Pin == GPIO_PIN_0)//Cuando pulsamos el botón nuestra flag cambia, lo que nos permite enceder y apagar el modo RGB
+	if (GPIO_Pin == GPIO_PIN_0)
 	{
 			flag =! flag;
 	}
 }
 
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc1)
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc1) //Asignacion directa de memoria
 {
-	//Asociamos las variables con los valores analogicos del buffer
-			Joystick_V = ADC_buffer [0];
+			Joystick_V = ADC_buffer [0]; //Asignacion de las Entradas en el buffer de 4
 			Joystick_H = ADC_buffer [1];
 			LDR = ADC_buffer [2];
 			Potentiometer = ADC_buffer [3];
 
-			Intensidad = ((Potentiometer)/100)%100;
+			Intensidad = ((Potentiometer)/100)%100; //Adaptacion de la lectura del potenciometro a un valor entre 0-100 que se adecue con el periodo
 
 
 		if(LDR < umbral_luz)
 				{
-						enable_lights(false); // en caso de que haya más luz de la esperada apaga las luces
+					enable_lights(false); // en caso de que haya más luz de la esperada apaga las luces
 				}
 				else
 				{
 					enable_lights(true); // en caso de que haya más luz de la esperada enciende las luces
 				}
-			//Control RGB activado
-			if (flag ==0){
+
+			if (flag ==0){ //Si el boton no esta pulsado el control RGB esta disponible
 				RGB_Control();
 
 			}
 
-			//Control RGB desactivado
-			if (flag == 1){
+
+			if (flag == 1){ //Apaga todos los Leds RGB si se pulsa el boton
 					HAL_GPIO_WritePin(GPIOE, GPIO_PIN_9, 0);
 					HAL_GPIO_WritePin(GPIOE, GPIO_PIN_11, 0);
 					HAL_GPIO_WritePin(GPIOE, GPIO_PIN_13, 0);
+					HAL_TIM_OC_Stop (&htim2, TIM_CHANNEL_3);
 
 			}
 
@@ -211,6 +212,7 @@ int main(void)
   MX_DMA_Init();
   MX_ADC1_Init();
   MX_TIM1_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
    /* HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
@@ -420,6 +422,55 @@ static void MX_TIM1_Init(void)
 }
 
 /**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 16;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 500000;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_OC_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_OC_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+  HAL_TIM_MspPostInit(&htim2);
+
+}
+
+/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -448,6 +499,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOE_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOE, GPIO_PIN_9|GPIO_PIN_11|GPIO_PIN_13, GPIO_PIN_RESET);
